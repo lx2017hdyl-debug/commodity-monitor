@@ -5,7 +5,7 @@ import {
   fetchInternationalByKeywords,
   getEmSecid,
 } from "@/lib/eastmoney-finance";
-import type { QuoteSnapshot } from "@/lib/sina-finance";
+import type { HistoryPoint, QuoteSnapshot } from "@/lib/sina-finance";
 import { fetchBatchLiveQuotes, generatePriceForecast } from "@/lib/sina-finance";
 
 export interface QuoteItem {
@@ -27,72 +27,116 @@ const DISCLAIMER_EM =
 const DISCLAIMER_SINA =
   "数据来源为新浪财经公开接口，通常为延迟行情（约 15 分钟或更久）。每条价格均标注市场时间与拉取时间，仅供采购参考，不构成投资或套保建议。";
 
-/** 国际品种在东方财富的名称匹配规则 */
 const INTL_KEYWORDS: Record<string, string[]> = {
-  "au-intl": ["纽约金", "COMEX黄金", "美黄金"],
-  "ag-intl": ["纽约银", "COMEX白银", "美白银"],
-  "cu-intl": ["美铜", "COMEX铜"],
+  "au-intl": ["纽约金", "COMEX黄金", "美黄金", "CMX黄金"],
+  "ag-intl": ["纽约银", "COMEX白银", "美白银", "CMX白银"],
+  "cu-intl": ["美铜", "COMEX铜", "CMX铜"],
   "al-intl": ["伦铝", "LME铝"],
   "ni-intl": ["伦镍", "LME镍"],
   "fe-intl": ["新加坡铁矿石", "SGX铁矿", "FEF"],
 };
 
-/** 优先东方财富，失败则回退新浪 */
-export async function loadDashboardQuotes(): Promise<QuotesPayload> {
-  const available = COMMODITIES.filter((c) => c.available && c.quoteSymbol);
-  const unavailable = COMMODITIES.filter((c) => !c.available);
+function emptyPayload(error: string): QuotesPayload {
+  return {
+    dataDisclaimer: "数据加载失败",
+    serverTime: new Date().toISOString(),
+    quotes: [],
+    unavailable: COMMODITIES.filter((c) => !c.available),
+    errors: [{ id: "all", error }],
+  };
+}
+
+/** 东方财富加载（国内失败也尽量返回国际，反之亦然） */
+async function loadFromEastMoney(
+  available: CommodityConfig[],
+  unavailable: CommodityConfig[],
+): Promise<QuotesPayload> {
+  const domestic = available.filter((c) => c.market === "domestic");
+  const international = available.filter((c) => c.market === "international");
+
+  let domMap = new Map<string, Omit<QuoteSnapshot, "history">>();
+  let intlMap = new Map<string, Omit<QuoteSnapshot, "history">>();
+  const partialErrors: Array<{ id: string; error: string }> = [];
 
   try {
-    const domestic = available.filter((c) => c.market === "domestic");
-    const international = available.filter((c) => c.market === "international");
+    domMap = await fetchDomesticByCodes(domestic.map((c) => c.klineSymbol));
+  } catch (e) {
+    partialErrors.push({
+      id: "domestic",
+      error: e instanceof Error ? e.message : "国内期货加载失败",
+    });
+  }
 
-    const [domMap, intlMap] = await Promise.all([
-      fetchDomesticByCodes(domestic.map((c) => c.klineSymbol)),
-      fetchInternationalByKeywords(
-        international.map((c) => ({
-          id: c.id,
-          keywords: INTL_KEYWORDS[c.id] ?? [c.name],
-        })),
-      ),
-    ]);
+  try {
+    intlMap = await fetchInternationalByKeywords(
+      international.map((c) => ({
+        id: c.id,
+        keywords: INTL_KEYWORDS[c.id] ?? [c.name],
+      })),
+    );
+  } catch (e) {
+    partialErrors.push({
+      id: "international",
+      error: e instanceof Error ? e.message : "国际期货加载失败",
+    });
+  }
 
-    const quotes = available
-      .map((commodity) => {
-        const live =
-          commodity.market === "domestic"
-            ? domMap.get(commodity.klineSymbol)
-            : intlMap.get(commodity.id);
-        if (!live) return null;
-        return {
-          commodity,
-          snapshot: { ...live, history: [] as QuoteSnapshot["history"] },
-        };
-      })
-      .filter((item): item is QuoteItem => item != null);
+  const quotes = available
+    .map((commodity) => {
+      const live =
+        commodity.market === "domestic"
+          ? domMap.get(commodity.klineSymbol)
+          : intlMap.get(commodity.id);
+      if (!live) return null;
+      return {
+        commodity,
+        snapshot: { ...live, history: [] as QuoteSnapshot["history"] },
+      };
+    })
+    .filter((item): item is QuoteItem => item != null);
 
-    const errors = available
+  const errors = [
+    ...partialErrors,
+    ...available
       .filter((c) => {
         const live =
           c.market === "domestic" ? domMap.get(c.klineSymbol) : intlMap.get(c.id);
         return !live;
       })
-      .map((c) => ({ id: c.id, error: "未获取到报价" }));
+      .map((c) => ({ id: c.id, error: "未获取到报价" })),
+  ];
 
-    if (quotes.length === 0) throw new Error("东方财富无数据");
+  if (quotes.length === 0) {
+    throw new Error(errors.map((e) => e.error).join("；") || "东方财富无数据");
+  }
 
-    return {
-      dataDisclaimer: DISCLAIMER_EM,
-      serverTime: new Date().toISOString(),
-      quotes,
-      unavailable,
-      errors,
-    };
-  } catch {
-    return loadDashboardQuotesSina(available, unavailable);
+  return {
+    dataDisclaimer: DISCLAIMER_EM,
+    serverTime: new Date().toISOString(),
+    quotes,
+    unavailable,
+    errors,
+  };
+}
+
+/** 优先东方财富，失败回退新浪；保证不抛异常 */
+export async function loadDashboardQuotes(): Promise<QuotesPayload> {
+  const available = COMMODITIES.filter((c) => c.available && c.quoteSymbol);
+  const unavailable = COMMODITIES.filter((c) => !c.available);
+
+  try {
+    return await loadFromEastMoney(available, unavailable);
+  } catch (emErr) {
+    try {
+      return await loadDashboardQuotesSina(available, unavailable);
+    } catch (sinaErr) {
+      const emMsg = emErr instanceof Error ? emErr.message : "东方财富失败";
+      const sinaMsg = sinaErr instanceof Error ? sinaErr.message : "新浪失败";
+      return emptyPayload(`${emMsg}；${sinaMsg}`);
+    }
   }
 }
 
-/** 新浪备用 */
 async function loadDashboardQuotesSina(
   available: CommodityConfig[],
   unavailable: CommodityConfig[],
@@ -112,6 +156,8 @@ async function loadDashboardQuotesSina(
     })
     .filter((item): item is QuoteItem => item != null);
 
+  if (quotes.length === 0) throw new Error("新浪无数据");
+
   return {
     dataDisclaimer: DISCLAIMER_SINA,
     serverTime: new Date().toISOString(),
@@ -123,12 +169,11 @@ async function loadDashboardQuotesSina(
   };
 }
 
-/** 单品种详情 */
 export async function loadCommodityDetail(commodity: CommodityConfig, range = "1y") {
   try {
     const secid = getEmSecid(commodity.market, commodity.klineSymbol);
     const [history, domMap, intlMap] = await Promise.all([
-      fetchEmHistory(secid, range),
+      fetchEmHistory(secid, range).catch(() => [] as HistoryPoint[]),
       commodity.market === "domestic"
         ? fetchDomesticByCodes([commodity.klineSymbol])
         : Promise.resolve(new Map()),

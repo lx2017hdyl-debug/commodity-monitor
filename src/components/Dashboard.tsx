@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { CommodityConfig } from "@/lib/commodities";
 import type { QuoteSnapshot } from "@/lib/sina-finance";
 import { formatFetchedAt } from "@/lib/format-time";
+import { loadDashboardQuotesEastMoneyBrowser } from "@/lib/eastmoney-browser";
 import { PriceCard } from "./PriceCard";
 
 interface QuoteItem {
@@ -25,7 +26,20 @@ interface DashboardProps {
   initialData?: QuotesResponse;
 }
 
-/** 主看板：通过本站 API 拉取（服务端走东方财富） */
+/** 安全解析 API 响应 */
+async function parseQuotesResponse(res: Response): Promise<QuotesResponse> {
+  const text = await res.text();
+  if (!text.trim()) {
+    throw new Error("服务器返回空数据，请稍后重试");
+  }
+  try {
+    return JSON.parse(text) as QuotesResponse;
+  } catch {
+    throw new Error("服务器返回格式异常");
+  }
+}
+
+/** 主看板 */
 export function Dashboard({ initialData }: DashboardProps) {
   const [data, setData] = useState<QuotesResponse | null>(initialData ?? null);
   const [loading, setLoading] = useState(!initialData?.quotes?.length);
@@ -38,15 +52,26 @@ export function Dashboard({ initialData }: DashboardProps) {
 
     try {
       const res = await fetch("/api/quotes", { cache: "no-store" });
-      const json = (await res.json()) as QuotesResponse;
-      if (!res.ok || !json.quotes?.length) {
-        throw new Error(
-          (json.errors?.[0] as { error?: string } | undefined)?.error ?? `加载失败 (${res.status})`,
-        );
+      const json = await parseQuotesResponse(res);
+
+      if (json.quotes?.length) {
+        setData(json);
+        return;
       }
-      setData(json);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "未知错误");
+
+      throw new Error(
+        (json.errors?.[0] as { error?: string } | undefined)?.error ?? `接口无数据 (${res.status})`,
+      );
+    } catch (apiErr) {
+      // Vercel 服务端失败时，改由浏览器直连东方财富
+      try {
+        const json = await loadDashboardQuotesEastMoneyBrowser();
+        setData(json);
+      } catch (browserErr) {
+        const apiMsg = apiErr instanceof Error ? apiErr.message : "接口失败";
+        const brMsg = browserErr instanceof Error ? browserErr.message : "浏览器加载失败";
+        setError(`${apiMsg}；${brMsg}`);
+      }
     } finally {
       setLoading(false);
     }

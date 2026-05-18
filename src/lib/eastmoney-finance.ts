@@ -40,6 +40,7 @@ async function fetchEmList(fs: string, pageSize = 500): Promise<EmRow[]> {
   url.searchParams.set("fid", "f12");
   url.searchParams.set("fs", fs);
   url.searchParams.set("fields", "f12,f14,f2,f3,f4,f15,f16,f17,f18,f124");
+  url.searchParams.set("ut", "fa5fd1943c7b033f871a2912cb9886f");
 
   const response = await fetch(url.toString(), {
     headers: EM_HEADERS,
@@ -103,7 +104,7 @@ export async function fetchDomesticByCodes(
 export async function fetchInternationalByKeywords(
   rules: Array<{ id: string; keywords: string[] }>,
 ): Promise<Map<string, Omit<QuoteSnapshot, "history">>> {
-  const rows = await fetchEmList("m:122", 800);
+  const rows = await fetchEmList("m:122,m:220", 800);
   const map = new Map<string, Omit<QuoteSnapshot, "history">>();
 
   for (const rule of rules) {

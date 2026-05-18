@@ -1,12 +1,32 @@
 import { NextResponse } from "next/server";
+import { COMMODITIES } from "@/lib/commodities";
 import { loadDashboardQuotes } from "@/lib/quotes-service";
 
 export const preferredRegion = "hkg1";
 export const dynamic = "force-dynamic";
+export const maxDuration = 30;
 
 /** 批量获取所有可用品种实时行情 */
 export async function GET() {
-  const payload = await loadDashboardQuotes();
-  const status = payload.quotes.length > 0 ? 200 : 502;
-  return NextResponse.json(payload, { status });
+  try {
+    const payload = await loadDashboardQuotes();
+    const status = payload.quotes.length > 0 ? 200 : 502;
+    return NextResponse.json(payload, { status });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        dataDisclaimer: "数据加载失败",
+        serverTime: new Date().toISOString(),
+        quotes: [],
+        unavailable: COMMODITIES.filter((c) => !c.available),
+        errors: [
+          {
+            id: "all",
+            error: error instanceof Error ? error.message : "未知错误",
+          },
+        ],
+      },
+      { status: 502 },
+    );
+  }
 }
