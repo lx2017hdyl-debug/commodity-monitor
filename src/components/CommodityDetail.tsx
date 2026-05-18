@@ -15,6 +15,7 @@ import {
 import { readQuoteFromCache } from "@/lib/quotes-cache";
 import { DataTimestamp } from "./DataTimestamp";
 import { PriceChart } from "./PriceChart";
+import { RangeSelector } from "./RangeSelector";
 
 interface ForecastPoint {
   date: string;
@@ -201,38 +202,36 @@ export function CommodityDetail({ commodityId, initialData = null }: CommodityDe
         )}
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        {RANGE_OPTIONS.map((opt) => (
-          <button
-            key={opt.value}
-            type="button"
-            onClick={() => setRange(opt.value)}
-            disabled={chartLoading}
-            className={`rounded-lg px-3 py-1.5 text-sm transition disabled:opacity-50 ${
-              range === opt.value
-                ? "bg-amber-500 text-slate-950 font-medium"
-                : "bg-slate-800 text-slate-300 hover:bg-slate-700"
-            }`}
-          >
-            {opt.label}
-          </button>
-        ))}
-      </div>
+      <RangeSelector
+        options={RANGE_OPTIONS}
+        value={range}
+        onChange={setRange}
+        disabled={chartLoading}
+      />
 
-      <section className="relative rounded-xl border border-slate-700 bg-slate-900/60 p-4">
+      <section className="relative overflow-hidden rounded-xl border border-slate-700 bg-slate-900/60 p-4">
         <h2 className="mb-4 text-lg font-semibold text-white">历史价格走势</h2>
+        <div
+          className={`transition-opacity duration-300 ease-out ${chartLoading ? "opacity-50" : "opacity-100"}`}
+        >
+          {snapshot.history.length > 0 ? (
+            <PriceChart
+              key={range}
+              data={snapshot.history.map((h) => ({ date: h.date, price: h.close }))}
+              unit={commodity.unit}
+              animate
+            />
+          ) : (
+            <div className="flex h-80 items-center justify-center text-slate-400">正在加载历史数据…</div>
+          )}
+        </div>
         {chartLoading && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-slate-900/70 text-sm text-slate-300">
-            图表加载中…
+          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-slate-900/40 backdrop-blur-[1px]">
+            <span className="inline-flex items-center gap-2 rounded-lg bg-slate-900/90 px-4 py-2 text-sm text-slate-200 shadow-lg">
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-amber-500 border-t-transparent" />
+              加载中…
+            </span>
           </div>
-        )}
-        {snapshot.history.length > 0 ? (
-          <PriceChart
-            data={snapshot.history.map((h) => ({ date: h.date, price: h.close }))}
-            unit={commodity.unit}
-          />
-        ) : (
-          <div className="flex h-80 items-center justify-center text-slate-400">正在加载历史数据…</div>
         )}
       </section>
 
@@ -242,7 +241,13 @@ export function CommodityDetail({ commodityId, initialData = null }: CommodityDe
           <p className="mb-4 text-xs text-slate-400">
             基于近 60 日收盘价的线性回归外推，虚线为未来 14 日预测区间，不代表实际走势。
           </p>
-          <PriceChart data={forecast} unit={commodity.unit} showForecast />
+          <PriceChart
+            key={`forecast-${range}`}
+            data={forecast}
+            unit={commodity.unit}
+            showForecast
+            animate
+          />
         </section>
       )}
     </div>

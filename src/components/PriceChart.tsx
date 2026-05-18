@@ -23,6 +23,8 @@ interface PriceChartProps {
   data: ChartPoint[];
   unit: string;
   showForecast?: boolean;
+  /** 切换区间时播放绘制动画 */
+  animate?: boolean;
 }
 
 /** 图表点过多时降采样，减轻渲染压力 */
@@ -37,7 +39,7 @@ function downsampleChartData(data: ChartPoint[], maxPoints = 180): ChartPoint[] 
 }
 
 /** 历史价格与预测图表 */
-export function PriceChart({ data, unit, showForecast = false }: PriceChartProps) {
+export function PriceChart({ data, unit, showForecast = false, animate = true }: PriceChartProps) {
   const chartData = useMemo(() => {
     const sampled = downsampleChartData(data);
     return sampled.map((d) => ({
@@ -47,8 +49,12 @@ export function PriceChart({ data, unit, showForecast = false }: PriceChartProps
     }));
   }, [data, showForecast]);
 
+  const animProps = animate
+    ? { isAnimationActive: true, animationDuration: 550, animationEasing: "ease-out" as const }
+    : { isAnimationActive: false };
+
   return (
-    <div className="h-80 w-full">
+    <div className="chart-fade-in h-80 w-full">
       <ResponsiveContainer width="100%" height="100%">
         <ComposedChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
           <defs>
@@ -87,7 +93,7 @@ export function PriceChart({ data, unit, showForecast = false }: PriceChartProps
             strokeWidth={2}
             dot={false}
             connectNulls={false}
-            isAnimationActive={false}
+            {...animProps}
           />
           {showForecast && (
             <Line
@@ -98,7 +104,7 @@ export function PriceChart({ data, unit, showForecast = false }: PriceChartProps
               strokeDasharray="6 4"
               dot={false}
               connectNulls
-              isAnimationActive={false}
+              {...animProps}
             />
           )}
         </ComposedChart>

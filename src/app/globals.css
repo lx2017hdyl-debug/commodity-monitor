@@ -17,3 +17,34 @@ body {
   color: var(--foreground);
   font-family: var(--font-sans), system-ui, sans-serif;
 }
+
+/* 图表切换区间时的淡入 */
+@keyframes chart-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.chart-fade-in {
+  animation: chart-fade-in 0.45s ease-out;
+}
+
+/* 区间按钮滑块 */
+@keyframes range-pill-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(245 158 11 / 0.35);
+  }
+  50% {
+    box-shadow: 0 0 12px 2px rgb(245 158 11 / 0.25);
+  }
+}
+
+.range-pill-active {
+  animation: range-pill-pulse 0.6s ease-out;
+}
