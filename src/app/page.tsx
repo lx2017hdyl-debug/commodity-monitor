@@ -1,6 +1,17 @@
 import { Dashboard } from "@/components/Dashboard";
+import { loadDashboardQuotes } from "@/lib/quotes-service";
 
-export default function HomePage() {
+export const preferredRegion = "hkg1";
+export const dynamic = "force-dynamic";
+
+export default async function HomePage() {
+  let initialData;
+  try {
+    initialData = await loadDashboardQuotes();
+  } catch {
+    initialData = undefined;
+  }
+
   return (
     <main className="mx-auto max-w-7xl flex-1 px-4 py-8 sm:px-6 lg:px-8">
       <header className="mb-8">
@@ -12,7 +23,7 @@ export default function HomePage() {
           所有报价均标注数据时间，延迟行情仅供采购决策参考。
         </p>
       </header>
-      <Dashboard />
+      <Dashboard initialData={initialData} />
     </main>
   );
 }

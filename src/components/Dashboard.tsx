@@ -1,10 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { COMMODITIES, type CommodityConfig } from "@/lib/commodities";
+import type { CommodityConfig } from "@/lib/commodities";
 import type { QuoteSnapshot } from "@/lib/sina-finance";
 import { formatFetchedAt } from "@/lib/format-time";
-import { loadDashboardQuotesBrowser } from "@/lib/market-data-browser";
 import { PriceCard } from "./PriceCard";
 
 interface QuoteItem {
@@ -26,7 +25,7 @@ interface DashboardProps {
   initialData?: QuotesResponse;
 }
 
-/** 主看板：浏览器直连新浪，避免 Vercel 服务器 IP 被 403 */
+/** 主看板：通过本站 API 拉取（服务端走东方财富） */
 export function Dashboard({ initialData }: DashboardProps) {
   const [data, setData] = useState<QuotesResponse | null>(initialData ?? null);
   const [loading, setLoading] = useState(!initialData?.quotes?.length);
@@ -38,26 +37,26 @@ export function Dashboard({ initialData }: DashboardProps) {
     setError(null);
 
     try {
-      const json = await loadDashboardQuotesBrowser(COMMODITIES);
-      if (!json.quotes?.length) {
+      const res = await fetch("/api/quotes", { cache: "no-store" });
+      const json = (await res.json()) as QuotesResponse;
+      if (!res.ok || !json.quotes?.length) {
         throw new Error(
-          (json.errors[0] as { error?: string } | undefined)?.error ?? "暂无行情数据，请稍后重试",
+          (json.errors?.[0] as { error?: string } | undefined)?.error ?? `加载失败 (${res.status})`,
         );
       }
-      setData(json as QuotesResponse);
+      setData(json);
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "未知错误";
-      setError(msg);
+      setError(e instanceof Error ? e.message : "未知错误");
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    void loadQuotes();
+    if (!initialData?.quotes?.length) void loadQuotes();
     const timer = setInterval(() => void loadQuotes(), 5 * 60 * 1000);
     return () => clearInterval(timer);
-  }, [loadQuotes]);
+  }, [loadQuotes, initialData?.quotes?.length]);
 
   const filtered =
     data?.quotes.filter((q) => filter === "all" || q.commodity.market === filter) ?? [];
@@ -69,9 +68,6 @@ export function Dashboard({ initialData }: DashboardProps) {
         <p className="mt-1 leading-relaxed">
           {data?.dataDisclaimer ??
             "本网站展示延迟行情，每条价格均标注市场时间与拉取时间，仅供采购参考，不构成投资或套保建议。"}
-        </p>
-        <p className="mt-2 text-xs text-amber-200/70">
-          行情在您浏览器中直连新浪财经加载（适配云端部署），请确保网络可访问行情源。
         </p>
         {data?.serverTime && (
           <p className="mt-2 text-xs text-amber-200/80">
@@ -113,9 +109,9 @@ export function Dashboard({ initialData }: DashboardProps) {
         </button>
       </div>
 
-      {error && (
+      {error && !data?.quotes?.length && (
         <div className="rounded-lg border border-red-500/40 bg-red-950/40 p-4 text-red-200">
-          {error}。请检查网络后点击「手动刷新」。
+          加载失败：{error}。请检查网络后点击「手动刷新」。
         </div>
       )}
 
@@ -146,7 +142,7 @@ export function Dashboard({ initialData }: DashboardProps) {
         </section>
       )}
 
-      {data && data.errors.length > 0 && data.quotes.length > 0 && (
+      {data && data.errors.length > 0 && (data.quotes?.length ?? 0) > 0 && (
         <section className="rounded-xl border border-orange-500/30 bg-orange-950/20 p-4 text-sm text-orange-200">
           <p className="font-medium">部分品种拉取失败</p>
           <ul className="mt-2 list-inside list-disc">

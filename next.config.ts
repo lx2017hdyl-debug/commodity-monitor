@@ -12,7 +12,7 @@ const nextConfig: NextConfig = {
             value: [
               "default-src 'self'",
               "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://hq.sinajs.cn https://stock2.finance.sina.com.cn",
-              "connect-src 'self' https://hq.sinajs.cn https://*.sina.com.cn https://*.sinajs.cn https://stock2.finance.sina.com.cn https://api.allorigins.win https://corsproxy.io",
+              "connect-src 'self' https://hq.sinajs.cn https://*.sina.com.cn https://*.sinajs.cn https://stock2.finance.sina.com.cn https://push2.eastmoney.com https://push2his.eastmoney.com https://api.allorigins.win https://corsproxy.io",
               "style-src 'self' 'unsafe-inline'",
               "img-src 'self' data: https:",
             ].join("; "),
