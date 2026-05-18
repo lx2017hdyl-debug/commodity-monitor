@@ -15,6 +15,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "大宗原材价格监控 | 采购看板",
   description: "金、银、铜、铁、铝、镍等国内与国际期货延迟行情、历史走势与趋势参考",
+  referrer: "no-referrer",
 };
 
 export default function RootLayout({

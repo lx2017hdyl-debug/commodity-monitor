@@ -1,5 +1,6 @@
 /**
- * 浏览器端行情拉取：在用户本地网络访问新浪，避免 Vercel 服务器 IP 被 403 拦截
+ * 浏览器端行情拉取：在用户本地网络访问新浪
+ * Vercel 域名下新浪可能拦截 script 标签，故提供多种备用加载方式
  */
 
 import type { CommodityConfig } from "@/lib/commodities";
@@ -14,16 +15,29 @@ import {
 const DATA_DISCLAIMER =
   "数据来源为新浪财经公开接口，通常为延迟行情（约 15 分钟或更久）。每条价格均标注市场时间与拉取时间，仅供采购参考，不构成投资或套保建议。";
 
-/** 通过 script 标签拉取新浪实时报价 */
-function fetchSinaLiveQuotesBrowser(symbols: string[]): Promise<Map<string, string[]>> {
+const SINA_QUOTE_BASE = "https://hq.sinajs.cn/list=";
+
+/** 解析新浪返回文本 */
+function parseSinaQuoteText(text: string): Map<string, string[]> {
+  const map = new Map<string, string[]>();
+  for (const line of text.split("\n")) {
+    const match = line.match(/var hq_str_(.+?)="(.+?)"/);
+    if (match) map.set(match[1], match[2].split(","));
+  }
+  return map;
+}
+
+/** 方式 1：script 标签（无 Referer，避免被 Vercel 域名拦截） */
+function fetchSinaViaScript(symbols: string[]): Promise<Map<string, string[]>> {
   return new Promise((resolve, reject) => {
     const script = document.createElement("script");
     script.charset = "gb2312";
+    script.referrerPolicy = "no-referrer";
 
     const timeout = setTimeout(() => {
       cleanup();
-      reject(new Error("新浪行情加载超时"));
-    }, 25000);
+      reject(new Error("script 超时"));
+    }, 20000);
 
     const cleanup = () => {
       clearTimeout(timeout);
@@ -41,7 +55,7 @@ function fetchSinaLiveQuotesBrowser(symbols: string[]): Promise<Map<string, stri
           }
         }
         cleanup();
-        if (map.size === 0) reject(new Error("未解析到有效行情"));
+        if (map.size === 0) reject(new Error("script 未解析到数据"));
         else resolve(map);
       } catch (e) {
         cleanup();
@@ -51,21 +65,69 @@ function fetchSinaLiveQuotesBrowser(symbols: string[]): Promise<Map<string, stri
 
     script.onerror = () => {
       cleanup();
-      reject(new Error("新浪脚本加载失败，请检查网络"));
+      reject(new Error("script onerror"));
     };
 
-    script.src = `https://hq.sinajs.cn/list=${symbols.join(",")}`;
+    script.src = `${SINA_QUOTE_BASE}${symbols.join(",")}`;
     document.body.appendChild(script);
   });
 }
 
-/** 国内 K 线 JSONP */
-function fetchDomesticKlineBrowser(klineSymbol: string): Promise<HistoryPoint[]> {
+/** 方式 2：经 CORS 代理拉取文本（适配 Vercel 页面） */
+async function fetchSinaViaProxy(symbols: string[]): Promise<Map<string, string[]>> {
+  const target = `${SINA_QUOTE_BASE}${symbols.join(",")}`;
+  const proxies = [
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(target)}`,
+    `https://corsproxy.io/?${encodeURIComponent(target)}`,
+  ];
+
+  let lastError = "代理失败";
+  for (const proxyUrl of proxies) {
+    try {
+      const response = await fetch(proxyUrl, { cache: "no-store" });
+      if (!response.ok) {
+        lastError = `HTTP ${response.status}`;
+        continue;
+      }
+      const text = await response.text();
+      const map = parseSinaQuoteText(text);
+      if (map.size > 0) return map;
+      lastError = "代理返回空数据";
+    } catch (e) {
+      lastError = e instanceof Error ? e.message : "代理异常";
+    }
+  }
+  throw new Error(lastError);
+}
+
+/** 拉取新浪实时报价（多方式重试） */
+async function fetchSinaLiveQuotesBrowser(symbols: string[]): Promise<Map<string, string[]>> {
+  const errors: string[] = [];
+
+  try {
+    return await fetchSinaViaProxy(symbols);
+  } catch (e) {
+    errors.push(e instanceof Error ? e.message : "代理");
+  }
+
+  try {
+    return await fetchSinaViaScript(symbols);
+  } catch (e) {
+    errors.push(e instanceof Error ? e.message : "script");
+  }
+
+  throw new Error(`行情加载失败（${errors.join("；")}），请稍后点击手动刷新`);
+}
+
+/** 国内 K 线：script JSONP */
+function fetchDomesticKlineViaScript(klineSymbol: string): Promise<HistoryPoint[]> {
   return new Promise((resolve, reject) => {
     const script = document.createElement("script");
+    script.referrerPolicy = "no-referrer";
+
     const timeout = setTimeout(() => {
       cleanup();
-      reject(new Error("K 线加载超时"));
+      reject(new Error("K线超时"));
     }, 30000);
 
     const cleanup = () => {
@@ -96,7 +158,7 @@ function fetchDomesticKlineBrowser(klineSymbol: string): Promise<HistoryPoint[]>
 
     script.onerror = () => {
       cleanup();
-      reject(new Error("国内 K 线加载失败"));
+      reject(new Error("K线 script 失败"));
     };
 
     script.src = `https://stock2.finance.sina.com.cn/futures/api/jsonp.php/var%20_/InnerFuturesNewService.getDailyKLine?symbol=${encodeURIComponent(klineSymbol)}`;
@@ -104,10 +166,74 @@ function fetchDomesticKlineBrowser(klineSymbol: string): Promise<HistoryPoint[]>
   });
 }
 
-/** 国际 K 线（浏览器直接请求） */
+/** 国内 K 线：代理拉取 JSONP 文本并解析 */
+async function fetchDomesticKlineViaProxy(klineSymbol: string): Promise<HistoryPoint[]> {
+  const target = `https://stock2.finance.sina.com.cn/futures/api/jsonp.php/var%20_/InnerFuturesNewService.getDailyKLine?symbol=${encodeURIComponent(klineSymbol)}`;
+  const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(target)}`;
+  const response = await fetch(proxyUrl);
+  if (!response.ok) throw new Error(`K线代理 HTTP ${response.status}`);
+  const text = await response.text();
+  const match = text.match(/\(\[([\s\S]*)\]\)/);
+  if (!match) throw new Error("K线解析失败");
+  const rows = JSON.parse(`[${match[1]}]`) as Array<{
+    d: string;
+    o: string;
+    h: string;
+    l: string;
+    c: string;
+    v: string;
+  }>;
+  return rows.map((row) => ({
+    date: row.d,
+    open: Number(row.o),
+    high: Number(row.h),
+    low: Number(row.l),
+    close: Number(row.c),
+    volume: Number(row.v) || 0,
+  }));
+}
+
+async function fetchDomesticKlineBrowser(klineSymbol: string): Promise<HistoryPoint[]> {
+  try {
+    return await fetchDomesticKlineViaProxy(klineSymbol);
+  } catch {
+    return fetchDomesticKlineViaScript(klineSymbol);
+  }
+}
+
+/** 国际 K 线 */
 async function fetchInternationalKlineBrowser(klineSymbol: string): Promise<HistoryPoint[]> {
-  const url = `https://stock2.finance.sina.com.cn/futures/api/openapi.php/GlobalFuturesService.getGlobalFuturesDailyKLine?symbol=${encodeURIComponent(klineSymbol)}`;
-  const response = await fetch(url, { referrer: "https://finance.sina.com.cn/" });
+  const target = `https://stock2.finance.sina.com.cn/futures/api/openapi.php/GlobalFuturesService.getGlobalFuturesDailyKLine?symbol=${encodeURIComponent(klineSymbol)}`;
+
+  try {
+    const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(target)}`;
+    const response = await fetch(proxyUrl);
+    if (response.ok) {
+      const json = JSON.parse(await response.text()) as {
+        result?: {
+          data?: Array<{ date: string; open: string; high: string; low: string; close: string; volume: string }>;
+        };
+      };
+      const rows = json.result?.data ?? [];
+      if (rows.length > 0) {
+        return rows.map((row) => ({
+          date: row.date,
+          open: Number(row.open),
+          high: Number(row.high),
+          low: Number(row.low),
+          close: Number(row.close),
+          volume: Number(row.volume) || 0,
+        }));
+      }
+    }
+  } catch {
+    /* 尝试直连 */
+  }
+
+  const response = await fetch(target, {
+    referrerPolicy: "no-referrer",
+    headers: { Referer: "https://finance.sina.com.cn/" },
+  });
   if (!response.ok) throw new Error(`国际 K 线请求失败 (${response.status})`);
   const json = (await response.json()) as {
     result?: {
@@ -155,11 +281,8 @@ export async function loadDashboardQuotesBrowser(commodities: CommodityConfig[])
   };
 }
 
-/** 浏览器端：单品种详情（报价 + 历史 + 预测） */
-export async function loadCommodityDetailBrowser(
-  commodity: CommodityConfig,
-  range = "1y",
-) {
+/** 浏览器端：单品种详情 */
+export async function loadCommodityDetailBrowser(commodity: CommodityConfig, range = "1y") {
   const [liveMap, fullHistory] = await Promise.all([
     fetchSinaLiveQuotesBrowser([commodity.quoteSymbol]),
     commodity.market === "domestic"
