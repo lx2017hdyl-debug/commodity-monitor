@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCommodityById } from "@/lib/commodities";
-import { loadCommodityDetail } from "@/lib/quotes-service";
+import { loadCommodityDetailCached } from "@/lib/quotes-service";
 
-export const preferredRegion = "hkg1";
 export const dynamic = "force-dynamic";
 
 interface RouteParams {
@@ -26,11 +25,13 @@ export async function GET(request: Request, { params }: RouteParams) {
   }
 
   const { searchParams } = new URL(request.url);
-  const range = searchParams.get("range") ?? "1y";
+  const range = searchParams.get("range") ?? "3mo";
 
   try {
-    const payload = await loadCommodityDetail(commodity, range);
-    return NextResponse.json(payload);
+    const payload = await loadCommodityDetailCached(commodity, range);
+    return NextResponse.json(payload, {
+      headers: { "Cache-Control": "public, max-age=120, stale-while-revalidate=180" },
+    });
   } catch (error) {
     return NextResponse.json(
       {

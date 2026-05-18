@@ -9,6 +9,7 @@
     "start": "next start",
     "start:intranet": "next start -H 0.0.0.0 -p 3000",
     "deploy:intranet": "bash scripts/deploy-intranet.sh",
+    "deploy:aliyun": "bash scripts/deploy-aliyun-ecs.sh",
     "lint": "eslint"
   },
   "dependencies": {

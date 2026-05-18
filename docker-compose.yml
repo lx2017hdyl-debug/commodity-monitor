@@ -1,0 +1,11 @@
+services:
+  commodity-monitor:
+    build: .
+    container_name: commodity-monitor
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_DATA_MODE: server
+      PORT: "3000"

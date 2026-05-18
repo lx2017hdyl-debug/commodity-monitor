@@ -5,6 +5,12 @@ import {
   fetchInternationalByKeywords,
   getEmSecid,
 } from "@/lib/eastmoney-finance";
+import {
+  getDashboardCache,
+  getDetailCache,
+  setDashboardCache,
+  setDetailCache,
+} from "@/lib/quotes-cache-server";
 import type { HistoryPoint, QuoteSnapshot } from "@/lib/sina-finance";
 import { fetchBatchLiveQuotes, generatePriceForecast } from "@/lib/sina-finance";
 
@@ -137,6 +143,15 @@ export async function loadDashboardQuotes(): Promise<QuotesPayload> {
   }
 }
 
+/** 带服务端缓存的看板数据（阿里云部署用） */
+export async function loadDashboardQuotesCached(): Promise<QuotesPayload> {
+  const hit = getDashboardCache();
+  if (hit) return hit;
+  const fresh = await loadDashboardQuotes();
+  if (fresh.quotes.length > 0) setDashboardCache(fresh);
+  return fresh;
+}
+
 async function loadDashboardQuotesSina(
   available: CommodityConfig[],
   unavailable: CommodityConfig[],
@@ -169,7 +184,7 @@ async function loadDashboardQuotesSina(
   };
 }
 
-export async function loadCommodityDetail(commodity: CommodityConfig, range = "1y") {
+export async function loadCommodityDetail(commodity: CommodityConfig, range = "3mo") {
   try {
     const secid = getEmSecid(commodity.market, commodity.klineSymbol);
     const [history, domMap, intlMap] = await Promise.all([
@@ -219,4 +234,16 @@ export async function loadCommodityDetail(commodity: CommodityConfig, range = "1
       forecast: generatePriceForecast(snapshot.history, 14),
     };
   }
+}
+
+/** 带服务端缓存的详情（阿里云部署用） */
+export async function loadCommodityDetailCached(commodity: CommodityConfig, range = "3mo") {
+  const hit = getDetailCache<Awaited<ReturnType<typeof loadCommodityDetail>>>(
+    commodity.id,
+    range,
+  );
+  if (hit) return hit;
+  const fresh = await loadCommodityDetail(commodity, range);
+  if (fresh.snapshot?.price) setDetailCache(commodity.id, range, fresh);
+  return fresh;
 }

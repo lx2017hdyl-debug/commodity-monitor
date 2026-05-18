@@ -1,7 +1,11 @@
 import { Dashboard } from "@/components/Dashboard";
+import { isServerDataMode } from "@/lib/deploy-config";
+import { loadDashboardQuotesCached } from "@/lib/quotes-service";
 
-/** 首页壳子静态输出，数据由浏览器直连行情源（更快） */
-export default function HomePage() {
+/** 首页：阿里云服务端预渲染，Vercel 由浏览器拉取 */
+export default async function HomePage() {
+  const initialData = isServerDataMode() ? await loadDashboardQuotesCached() : null;
+
   return (
     <main className="mx-auto max-w-7xl flex-1 px-4 py-8 sm:px-6 lg:px-8">
       <header className="mb-8">
@@ -13,7 +17,7 @@ export default function HomePage() {
           所有报价均标注数据时间，延迟行情仅供采购决策参考。
         </p>
       </header>
-      <Dashboard />
+      <Dashboard initialData={initialData} />
     </main>
   );
 }

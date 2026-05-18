@@ -1,17 +1,19 @@
 import { NextResponse } from "next/server";
 import { COMMODITIES } from "@/lib/commodities";
-import { loadDashboardQuotes } from "@/lib/quotes-service";
+import { loadDashboardQuotesCached } from "@/lib/quotes-service";
 
-export const preferredRegion = "hkg1";
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
 /** 批量获取所有可用品种实时行情 */
 export async function GET() {
   try {
-    const payload = await loadDashboardQuotes();
+    const payload = await loadDashboardQuotesCached();
     const status = payload.quotes.length > 0 ? 200 : 502;
-    return NextResponse.json(payload, { status });
+    return NextResponse.json(payload, {
+      status,
+      headers: { "Cache-Control": "public, max-age=60, stale-while-revalidate=120" },
+    });
   } catch (error) {
     return NextResponse.json(
       {

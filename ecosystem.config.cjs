@@ -13,6 +13,8 @@ module.exports = {
       env: {
         NODE_ENV: "production",
         PORT: 3000,
+        /** 阿里云 / 内网：服务端拉行情 */
+        NEXT_PUBLIC_DATA_MODE: "server",
       },
     },
   ],

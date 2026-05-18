@@ -2,16 +2,21 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { formatFetchedAt } from "@/lib/format-time";
+import { isServerDataMode } from "@/lib/deploy-config";
 import { loadDashboardWithCache, type DashboardQuotes } from "@/lib/quotes-client";
-import { readQuotesCache } from "@/lib/quotes-cache";
+import { readQuotesCache, writeQuotesCache } from "@/lib/quotes-cache";
 import { PriceCard } from "./PriceCard";
 
 type MarketFilter = "all" | "domestic" | "international";
 
+interface DashboardProps {
+  initialData?: DashboardQuotes | null;
+}
+
 /** 主看板 */
-export function Dashboard() {
-  const [data, setData] = useState<DashboardQuotes | null>(null);
-  const [loading, setLoading] = useState(true);
+export function Dashboard({ initialData = null }: DashboardProps) {
+  const [data, setData] = useState<DashboardQuotes | null>(initialData);
+  const [loading, setLoading] = useState(!initialData?.quotes?.length);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<MarketFilter>("all");
@@ -44,16 +49,22 @@ export function Dashboard() {
   }, []);
 
   useEffect(() => {
-    const cached = readQuotesCache<DashboardQuotes>();
-    if (cached) {
-      setData(cached);
-      setLoading(false);
+    if (initialData?.quotes?.length) {
+      writeQuotesCache(initialData);
       void loadQuotes(true);
     } else {
-      void loadQuotes(false);
+      const cached = readQuotesCache<DashboardQuotes>();
+      if (cached) {
+        setData(cached);
+        setLoading(false);
+        void loadQuotes(true);
+      } else {
+        void loadQuotes(false);
+      }
     }
 
-    const timer = setInterval(() => void loadQuotes(true), 5 * 60 * 1000);
+    const intervalMs = isServerDataMode() ? 2 * 60 * 1000 : 5 * 60 * 1000;
+    const timer = setInterval(() => void loadQuotes(true), intervalMs);
     return () => {
       clearInterval(timer);
       abortRef.current?.abort();
@@ -76,7 +87,11 @@ export function Dashboard() {
         {data?.serverTime && (
           <p className="mt-2 text-xs text-amber-200/80">
             页面数据更新时间：{formatFetchedAt(data.serverTime)}
-            {refreshing ? " · 正在后台更新…" : " · 每 5 分钟自动刷新"}
+            {refreshing
+              ? " · 正在后台更新…"
+              : isServerDataMode()
+                ? " · 每 2 分钟自动刷新"
+                : " · 每 5 分钟自动刷新"}
           </p>
         )}
       </div>
