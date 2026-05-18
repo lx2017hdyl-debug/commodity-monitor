@@ -61,11 +61,12 @@ export async function loadDashboardQuotesEastMoneyBrowser() {
   ]);
 
   const domesticRows = [...shfe, ...dce];
+  const domesticMap = new Map(domesticRows.map((r) => [r.f12, r]));
   const quotes: Array<{ commodity: CommodityConfig; snapshot: QuoteSnapshot }> = [];
 
   for (const commodity of available) {
     if (commodity.market === "domestic") {
-      const row = domesticRows.find((r) => r.f12 === commodity.klineSymbol);
+      const row = domesticMap.get(commodity.klineSymbol);
       if (row) {
         quotes.push({
           commodity,

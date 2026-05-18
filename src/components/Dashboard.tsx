@@ -1,90 +1,69 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import type { CommodityConfig } from "@/lib/commodities";
-import type { QuoteSnapshot } from "@/lib/sina-finance";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { formatFetchedAt } from "@/lib/format-time";
-import { loadDashboardQuotesEastMoneyBrowser } from "@/lib/eastmoney-browser";
+import { loadDashboardWithCache, type DashboardQuotes } from "@/lib/quotes-client";
+import { readQuotesCache } from "@/lib/quotes-cache";
 import { PriceCard } from "./PriceCard";
-
-interface QuoteItem {
-  commodity: CommodityConfig;
-  snapshot: QuoteSnapshot;
-}
-
-interface QuotesResponse {
-  dataDisclaimer: string;
-  serverTime: string;
-  quotes: QuoteItem[];
-  unavailable: CommodityConfig[];
-  errors: Array<{ id: string; error: string } | null>;
-}
 
 type MarketFilter = "all" | "domestic" | "international";
 
-interface DashboardProps {
-  initialData?: QuotesResponse;
-}
-
-/** 安全解析 API 响应 */
-async function parseQuotesResponse(res: Response): Promise<QuotesResponse> {
-  const text = await res.text();
-  if (!text.trim()) {
-    throw new Error("服务器返回空数据，请稍后重试");
-  }
-  try {
-    return JSON.parse(text) as QuotesResponse;
-  } catch {
-    throw new Error("服务器返回格式异常");
-  }
-}
-
 /** 主看板 */
-export function Dashboard({ initialData }: DashboardProps) {
-  const [data, setData] = useState<QuotesResponse | null>(initialData ?? null);
-  const [loading, setLoading] = useState(!initialData?.quotes?.length);
+export function Dashboard() {
+  const [data, setData] = useState<DashboardQuotes | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<MarketFilter>("all");
+  const abortRef = useRef<AbortController | null>(null);
 
-  const loadQuotes = useCallback(async () => {
-    setLoading(true);
+  const loadQuotes = useCallback(async (soft = false) => {
+    abortRef.current?.abort();
+    abortRef.current = new AbortController();
+
+    if (!soft) setLoading(true);
+    else setRefreshing(true);
     setError(null);
 
     try {
-      const res = await fetch("/api/quotes", { cache: "no-store" });
-      const json = await parseQuotesResponse(res);
-
-      if (json.quotes?.length) {
-        setData(json);
-        return;
-      }
-
-      throw new Error(
-        (json.errors?.[0] as { error?: string } | undefined)?.error ?? `接口无数据 (${res.status})`,
-      );
-    } catch (apiErr) {
-      // Vercel 服务端失败时，改由浏览器直连东方财富
-      try {
-        const json = await loadDashboardQuotesEastMoneyBrowser();
-        setData(json);
-      } catch (browserErr) {
-        const apiMsg = apiErr instanceof Error ? apiErr.message : "接口失败";
-        const brMsg = browserErr instanceof Error ? browserErr.message : "浏览器加载失败";
-        setError(`${apiMsg}；${brMsg}`);
+      const json = await loadDashboardWithCache((cached) => {
+        setData(cached);
+        setLoading(false);
+      });
+      if (!abortRef.current.signal.aborted) setData(json);
+    } catch (e) {
+      if (!abortRef.current.signal.aborted) {
+        setError(e instanceof Error ? e.message : "加载失败");
       }
     } finally {
-      setLoading(false);
+      if (!abortRef.current.signal.aborted) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, []);
 
   useEffect(() => {
-    if (!initialData?.quotes?.length) void loadQuotes();
-    const timer = setInterval(() => void loadQuotes(), 5 * 60 * 1000);
-    return () => clearInterval(timer);
-  }, [loadQuotes, initialData?.quotes?.length]);
+    const cached = readQuotesCache<DashboardQuotes>();
+    if (cached) {
+      setData(cached);
+      setLoading(false);
+      void loadQuotes(true);
+    } else {
+      void loadQuotes(false);
+    }
+
+    const timer = setInterval(() => void loadQuotes(true), 5 * 60 * 1000);
+    return () => {
+      clearInterval(timer);
+      abortRef.current?.abort();
+    };
+  }, [loadQuotes]);
 
   const filtered =
     data?.quotes.filter((q) => filter === "all" || q.commodity.market === filter) ?? [];
+
+  const showSkeleton = loading && !data?.quotes?.length;
 
   return (
     <div className="space-y-6">
@@ -96,7 +75,8 @@ export function Dashboard({ initialData }: DashboardProps) {
         </p>
         {data?.serverTime && (
           <p className="mt-2 text-xs text-amber-200/80">
-            页面数据更新时间：{formatFetchedAt(data.serverTime)} · 每 5 分钟自动刷新
+            页面数据更新时间：{formatFetchedAt(data.serverTime)}
+            {refreshing ? " · 正在后台更新…" : " · 每 5 分钟自动刷新"}
           </p>
         )}
       </div>
@@ -126,11 +106,11 @@ export function Dashboard({ initialData }: DashboardProps) {
         </div>
         <button
           type="button"
-          onClick={() => void loadQuotes()}
-          disabled={loading}
+          onClick={() => void loadQuotes(true)}
+          disabled={loading || refreshing}
           className="rounded-lg bg-slate-800 px-4 py-1.5 text-sm text-slate-200 hover:bg-slate-700 disabled:opacity-50"
         >
-          {loading ? "刷新中…" : "手动刷新"}
+          {loading || refreshing ? "刷新中…" : "手动刷新"}
         </button>
       </div>
 
@@ -141,7 +121,7 @@ export function Dashboard({ initialData }: DashboardProps) {
       )}
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {loading && !data?.quotes?.length
+        {showSkeleton
           ? Array.from({ length: 8 }).map((_, i) => (
               <div key={i} className="h-44 animate-pulse rounded-xl bg-slate-800/60" />
             ))
@@ -163,21 +143,6 @@ export function Dashboard({ initialData }: DashboardProps) {
                 {c.unavailableReason}
               </li>
             ))}
-          </ul>
-        </section>
-      )}
-
-      {data && data.errors.length > 0 && (data.quotes?.length ?? 0) > 0 && (
-        <section className="rounded-xl border border-orange-500/30 bg-orange-950/20 p-4 text-sm text-orange-200">
-          <p className="font-medium">部分品种拉取失败</p>
-          <ul className="mt-2 list-inside list-disc">
-            {data.errors.map((e) =>
-              e ? (
-                <li key={e.id}>
-                  {e.id}: {e.error}
-                </li>
-              ) : null,
-            )}
           </ul>
         </section>
       )}

@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import {
   Area,
   CartesianGrid,
@@ -24,13 +25,27 @@ interface PriceChartProps {
   showForecast?: boolean;
 }
 
+/** 图表点过多时降采样，减轻渲染压力 */
+function downsampleChartData(data: ChartPoint[], maxPoints = 180): ChartPoint[] {
+  if (data.length <= maxPoints) return data;
+  const step = Math.ceil(data.length / maxPoints);
+  const sampled: ChartPoint[] = [];
+  for (let i = 0; i < data.length; i += step) sampled.push(data[i]);
+  const last = data[data.length - 1];
+  if (sampled[sampled.length - 1]?.date !== last.date) sampled.push(last);
+  return sampled;
+}
+
 /** 历史价格与预测图表 */
 export function PriceChart({ data, unit, showForecast = false }: PriceChartProps) {
-  const chartData = data.map((d) => ({
-    date: d.date.slice(5),
-    历史价格: d.isForecast ? null : d.price,
-    趋势预测: d.isForecast ? d.price : showForecast ? d.price : null,
-  }));
+  const chartData = useMemo(() => {
+    const sampled = downsampleChartData(data);
+    return sampled.map((d) => ({
+      date: d.date.slice(5),
+      历史价格: d.isForecast ? null : d.price,
+      趋势预测: d.isForecast ? d.price : showForecast ? d.price : null,
+    }));
+  }, [data, showForecast]);
 
   return (
     <div className="h-80 w-full">
@@ -72,6 +87,7 @@ export function PriceChart({ data, unit, showForecast = false }: PriceChartProps
             strokeWidth={2}
             dot={false}
             connectNulls={false}
+            isAnimationActive={false}
           />
           {showForecast && (
             <Line
@@ -82,6 +98,7 @@ export function PriceChart({ data, unit, showForecast = false }: PriceChartProps
               strokeDasharray="6 4"
               dot={false}
               connectNulls
+              isAnimationActive={false}
             />
           )}
         </ComposedChart>

@@ -1,14 +1,7 @@
 import { Dashboard } from "@/components/Dashboard";
-import { loadDashboardQuotes } from "@/lib/quotes-service";
 
-export const preferredRegion = "hkg1";
-export const dynamic = "force-dynamic";
-
-export default async function HomePage() {
-  // 服务端预加载（失败不阻塞页面，由浏览器备用方案兜底）
-  const initialData = await loadDashboardQuotes().catch(() => undefined);
-  const hasQuotes = (initialData?.quotes?.length ?? 0) > 0;
-
+/** 首页壳子静态输出，数据由浏览器直连行情源（更快） */
+export default function HomePage() {
   return (
     <main className="mx-auto max-w-7xl flex-1 px-4 py-8 sm:px-6 lg:px-8">
       <header className="mb-8">
@@ -20,7 +13,7 @@ export default async function HomePage() {
           所有报价均标注数据时间，延迟行情仅供采购决策参考。
         </p>
       </header>
-      <Dashboard initialData={hasQuotes ? initialData : undefined} />
+      <Dashboard />
     </main>
   );
 }

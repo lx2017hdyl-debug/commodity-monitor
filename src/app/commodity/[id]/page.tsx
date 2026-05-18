@@ -2,7 +2,6 @@ import { COMMODITIES } from "@/lib/commodities";
 import { CommodityDetail } from "@/components/CommodityDetail";
 
 export const preferredRegion = "hkg1";
-export const dynamic = "force-dynamic";
 
 interface PageProps {
   params: Promise<{ id: string }>;

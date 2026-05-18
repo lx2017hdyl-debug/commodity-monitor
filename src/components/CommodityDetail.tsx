@@ -1,11 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { CommodityConfig } from "@/lib/commodities";
+import { getCommodityById } from "@/lib/commodities";
 import { formatChangePercent, formatPrice } from "@/lib/commodities";
 import type { QuoteSnapshot } from "@/lib/sina-finance";
+import { generatePriceForecast } from "@/lib/sina-finance";
 import { formatFetchedAt } from "@/lib/format-time";
+import {
+  loadCommodityDetailFast,
+  loadCommodityHistoryFast,
+} from "@/lib/quotes-client";
+import { readQuoteFromCache } from "@/lib/quotes-cache";
 import { DataTimestamp } from "./DataTimestamp";
 import { PriceChart } from "./PriceChart";
 
@@ -38,29 +45,80 @@ interface CommodityDetailProps {
 
 /** 品种详情页 */
 export function CommodityDetail({ commodityId }: CommodityDetailProps) {
-  const [range, setRange] = useState("1y");
+  const [range, setRange] = useState("3mo");
   const [data, setData] = useState<DetailResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [chartLoading, setChartLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const skipRangeEffect = useRef(true);
+  const rangeRef = useRef(range);
+  rangeRef.current = range;
 
   const loadDetail = useCallback(async () => {
     setLoading(true);
     setError(null);
+
+    const commodity = getCommodityById(commodityId);
+    const cached = readQuoteFromCache(commodityId) as QuoteSnapshot | null;
+    if (cached?.price && commodity) {
+      setData({
+        dataDisclaimer:
+          "数据来源为新浪财经公开接口，通常为延迟行情（约 15 分钟或更久），仅供采购参考。",
+        serverTime: new Date().toISOString(),
+        commodity,
+        snapshot: { ...cached, history: [] },
+        forecast: [],
+      });
+      setLoading(false);
+    }
+
     try {
-      const res = await fetch(`/api/quotes/${commodityId}?range=${range}`, { cache: "no-store" });
-      const json = (await res.json()) as DetailResponse;
-      if (!res.ok) throw new Error(json.error ?? "加载失败");
+      const json = await loadCommodityDetailFast(commodityId, rangeRef.current);
       setData(json);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "未知错误");
+      if (!cached?.price) {
+        setError(e instanceof Error ? e.message : "未知错误");
+      }
     } finally {
       setLoading(false);
     }
-  }, [commodityId, range]);
+  }, [commodityId]);
+
+  const loadHistoryOnly = useCallback(
+    async (nextRange: string) => {
+      setChartLoading(true);
+      setError(null);
+      try {
+        const history = await loadCommodityHistoryFast(commodityId, nextRange);
+        setData((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            snapshot: { ...prev.snapshot, history },
+            forecast: generatePriceForecast(history, 14),
+          };
+        });
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "K 线加载失败");
+      } finally {
+        setChartLoading(false);
+      }
+    },
+    [commodityId],
+  );
 
   useEffect(() => {
+    skipRangeEffect.current = true;
     void loadDetail();
-  }, [loadDetail]);
+  }, [commodityId, loadDetail]);
+
+  useEffect(() => {
+    if (skipRangeEffect.current) {
+      skipRangeEffect.current = false;
+      return;
+    }
+    void loadHistoryOnly(range);
+  }, [range, loadHistoryOnly]);
 
   if (loading && !data) {
     return (
@@ -71,7 +129,7 @@ export function CommodityDetail({ commodityId }: CommodityDetailProps) {
     );
   }
 
-  if (error || !data) {
+  if (error && !data) {
     return (
       <div className="rounded-xl border border-red-500/40 bg-red-950/40 p-6 text-red-200">
         <p className="font-medium">无法加载该品种</p>
@@ -82,6 +140,8 @@ export function CommodityDetail({ commodityId }: CommodityDetailProps) {
       </div>
     );
   }
+
+  if (!data) return null;
 
   const { commodity, snapshot, forecast } = data;
   const isUp = snapshot.change >= 0;
@@ -113,7 +173,6 @@ export function CommodityDetail({ commodityId }: CommodityDetailProps) {
         <DataTimestamp marketTime={snapshot.marketTime} fetchedAt={snapshot.fetchedAt} />
       </header>
 
-      {/* 数据声明 */}
       <div className="rounded-xl border border-amber-500/40 bg-amber-950/40 p-4 text-sm text-amber-100">
         <p>{data.dataDisclaimer}</p>
         <p className="mt-2 text-xs text-amber-200/80">
@@ -121,7 +180,6 @@ export function CommodityDetail({ commodityId }: CommodityDetailProps) {
         </p>
       </div>
 
-      {/* 当前价格 */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatBox label="最新价" value={formatPrice(snapshot.price, commodity.unit)} highlight />
         <StatBox
@@ -138,14 +196,14 @@ export function CommodityDetail({ commodityId }: CommodityDetailProps) {
         )}
       </div>
 
-      {/* 历史区间选择 */}
       <div className="flex flex-wrap gap-2">
         {RANGE_OPTIONS.map((opt) => (
           <button
             key={opt.value}
             type="button"
             onClick={() => setRange(opt.value)}
-            className={`rounded-lg px-3 py-1.5 text-sm transition ${
+            disabled={chartLoading}
+            className={`rounded-lg px-3 py-1.5 text-sm transition disabled:opacity-50 ${
               range === opt.value
                 ? "bg-amber-500 text-slate-950 font-medium"
                 : "bg-slate-800 text-slate-300 hover:bg-slate-700"
@@ -156,16 +214,23 @@ export function CommodityDetail({ commodityId }: CommodityDetailProps) {
         ))}
       </div>
 
-      {/* 历史走势 */}
-      <section className="rounded-xl border border-slate-700 bg-slate-900/60 p-4">
+      <section className="relative rounded-xl border border-slate-700 bg-slate-900/60 p-4">
         <h2 className="mb-4 text-lg font-semibold text-white">历史价格走势</h2>
-        <PriceChart
-          data={snapshot.history.map((h) => ({ date: h.date, price: h.close }))}
-          unit={commodity.unit}
-        />
+        {chartLoading && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-slate-900/70 text-sm text-slate-300">
+            图表加载中…
+          </div>
+        )}
+        {snapshot.history.length > 0 ? (
+          <PriceChart
+            data={snapshot.history.map((h) => ({ date: h.date, price: h.close }))}
+            unit={commodity.unit}
+          />
+        ) : (
+          <div className="flex h-80 items-center justify-center text-slate-400">正在加载历史数据…</div>
+        )}
       </section>
 
-      {/* 趋势预测 */}
       {forecast.length > 0 && (
         <section className="rounded-xl border border-slate-700 bg-slate-900/60 p-4">
           <h2 className="mb-1 text-lg font-semibold text-white">趋势预测（参考）</h2>

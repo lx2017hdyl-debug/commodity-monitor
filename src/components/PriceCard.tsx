@@ -18,6 +18,7 @@ export function PriceCard({ commodity, snapshot }: PriceCardProps) {
   return (
     <Link
       href={`/commodity/${commodity.id}`}
+      prefetch
       className="group flex flex-col gap-3 rounded-xl border border-slate-700/80 bg-slate-900/60 p-4 transition hover:border-slate-500 hover:bg-slate-900"
     >
       <div className="flex items-start justify-between gap-2">

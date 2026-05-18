@@ -37,7 +37,7 @@ function fetchSinaViaScript(symbols: string[]): Promise<Map<string, string[]>> {
     const timeout = setTimeout(() => {
       cleanup();
       reject(new Error("script 超时"));
-    }, 20000);
+    }, 8000);
 
     const cleanup = () => {
       clearTimeout(timeout);
@@ -100,23 +100,19 @@ async function fetchSinaViaProxy(symbols: string[]): Promise<Map<string, string[
   throw new Error(lastError);
 }
 
-/** 拉取新浪实时报价（多方式重试） */
+/** 拉取新浪实时报价：优先 script（1 次请求最快），超时 8 秒 */
 async function fetchSinaLiveQuotesBrowser(symbols: string[]): Promise<Map<string, string[]>> {
-  const errors: string[] = [];
+  const scriptPromise = fetchSinaViaScript(symbols);
+  const timeoutPromise = new Promise<Map<string, string[]>>((_, reject) => {
+    setTimeout(() => reject(new Error("新浪行情超时")), 8000);
+  });
 
   try {
-    return await fetchSinaViaProxy(symbols);
-  } catch (e) {
-    errors.push(e instanceof Error ? e.message : "代理");
+    return await Promise.race([scriptPromise, timeoutPromise]);
+  } catch {
+    /* 最后才尝试代理（较慢，部分网络不可用） */
+    return fetchSinaViaProxy(symbols);
   }
-
-  try {
-    return await fetchSinaViaScript(symbols);
-  } catch (e) {
-    errors.push(e instanceof Error ? e.message : "script");
-  }
-
-  throw new Error(`行情加载失败（${errors.join("；")}），请稍后点击手动刷新`);
 }
 
 /** 国内 K 线：script JSONP */
@@ -128,7 +124,7 @@ function fetchDomesticKlineViaScript(klineSymbol: string): Promise<HistoryPoint[
     const timeout = setTimeout(() => {
       cleanup();
       reject(new Error("K线超时"));
-    }, 30000);
+    }, 10000);
 
     const cleanup = () => {
       clearTimeout(timeout);
@@ -195,9 +191,9 @@ async function fetchDomesticKlineViaProxy(klineSymbol: string): Promise<HistoryP
 
 async function fetchDomesticKlineBrowser(klineSymbol: string): Promise<HistoryPoint[]> {
   try {
-    return await fetchDomesticKlineViaProxy(klineSymbol);
+    return await fetchDomesticKlineViaScript(klineSymbol);
   } catch {
-    return fetchDomesticKlineViaScript(klineSymbol);
+    return fetchDomesticKlineViaProxy(klineSymbol);
   }
 }
 
@@ -281,13 +277,23 @@ export async function loadDashboardQuotesBrowser(commodities: CommodityConfig[])
   };
 }
 
+/** 仅拉取 K 线（详情页切换区间时用） */
+export async function loadCommodityHistoryBrowser(
+  commodity: CommodityConfig,
+  range: string,
+): Promise<HistoryPoint[]> {
+  const full =
+    commodity.market === "domestic"
+      ? await fetchDomesticKlineBrowser(commodity.klineSymbol)
+      : await fetchInternationalKlineBrowser(commodity.klineSymbol);
+  return filterHistoryByRange(full, range);
+}
+
 /** 浏览器端：单品种详情 */
-export async function loadCommodityDetailBrowser(commodity: CommodityConfig, range = "1y") {
+export async function loadCommodityDetailBrowser(commodity: CommodityConfig, range = "3mo") {
   const [liveMap, fullHistory] = await Promise.all([
     fetchSinaLiveQuotesBrowser([commodity.quoteSymbol]),
-    commodity.market === "domestic"
-      ? fetchDomesticKlineBrowser(commodity.klineSymbol)
-      : fetchInternationalKlineBrowser(commodity.klineSymbol),
+    loadCommodityHistoryBrowser(commodity, range),
   ]);
 
   const fields = liveMap.get(commodity.quoteSymbol);
@@ -298,10 +304,9 @@ export async function loadCommodityDetailBrowser(commodity: CommodityConfig, ran
       ? parseDomesticQuote(fields, commodity.quoteSymbol)
       : parseInternationalQuote(fields, commodity.quoteSymbol);
 
-  const history = filterHistoryByRange(fullHistory, range);
   const snapshot: QuoteSnapshot = {
     ...quote,
-    history: history.length > 0 ? history : fullHistory.slice(-30),
+    history: fullHistory.length > 0 ? fullHistory : [],
   };
 
   return {
