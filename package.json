@@ -11,6 +11,7 @@
     "deploy:intranet": "bash scripts/deploy-intranet.sh",
     "deploy:aliyun": "bash scripts/deploy-aliyun-ecs.sh",
     "deploy:oracle": "bash scripts/deploy-oracle-instance.sh",
+    "share:tunnel": "bash scripts/start-share-tunnel.sh",
     "lint": "eslint"
   },
   "dependencies": {
