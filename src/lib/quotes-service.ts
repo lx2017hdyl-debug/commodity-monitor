@@ -64,26 +64,29 @@ async function loadFromEastMoney(
   let intlMap = new Map<string, Omit<QuoteSnapshot, "history">>();
   const partialErrors: Array<{ id: string; error: string }> = [];
 
-  try {
-    domMap = await fetchDomesticByCodes(domestic.map((c) => c.klineSymbol));
-  } catch (e) {
-    partialErrors.push({
-      id: "domestic",
-      error: e instanceof Error ? e.message : "国内期货加载失败",
-    });
-  }
-
-  try {
-    intlMap = await fetchInternationalByKeywords(
+  const [domResult, intlResult] = await Promise.allSettled([
+    fetchDomesticByCodes(domestic.map((c) => c.klineSymbol)),
+    fetchInternationalByKeywords(
       international.map((c) => ({
         id: c.id,
         keywords: INTL_KEYWORDS[c.id] ?? [c.name],
       })),
-    );
-  } catch (e) {
+    ),
+  ]);
+
+  if (domResult.status === "fulfilled") domMap = domResult.value;
+  else {
+    partialErrors.push({
+      id: "domestic",
+      error: domResult.reason instanceof Error ? domResult.reason.message : "国内期货加载失败",
+    });
+  }
+
+  if (intlResult.status === "fulfilled") intlMap = intlResult.value;
+  else {
     partialErrors.push({
       id: "international",
-      error: e instanceof Error ? e.message : "国际期货加载失败",
+      error: intlResult.reason instanceof Error ? intlResult.reason.message : "国际期货加载失败",
     });
   }
 

@@ -1,10 +1,17 @@
 import { Dashboard } from "@/components/Dashboard";
-import { isServerDataMode } from "@/lib/deploy-config";
 import { loadDashboardQuotesCached } from "@/lib/quotes-service";
 
-/** 首页：阿里云服务端预渲染，Vercel 由浏览器拉取 */
+/** 首页每 60 秒在服务端重新生成，打开即可看到价格 */
+export const revalidate = 60;
+
+/** 首页：服务端预取行情（Vercel 走东财 API，比浏览器 script 快） */
 export default async function HomePage() {
-  const initialData = isServerDataMode() ? await loadDashboardQuotesCached() : null;
+  let initialData = null;
+  try {
+    initialData = await loadDashboardQuotesCached();
+  } catch {
+    /* 客户端会重试 */
+  }
 
   return (
     <main className="mx-auto max-w-7xl flex-1 px-4 py-8 sm:px-6 lg:px-8">

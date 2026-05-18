@@ -51,16 +51,24 @@ export function Dashboard({ initialData = null }: DashboardProps) {
   useEffect(() => {
     if (initialData?.quotes?.length) {
       writeQuotesCache(initialData);
+      // 已有服务端数据，延迟 45 秒再后台刷新，避免打开瞬间重复请求
+      const delayed = setTimeout(() => void loadQuotes(true), 45_000);
+      const intervalMs = 2 * 60 * 1000;
+      const timer = setInterval(() => void loadQuotes(true), intervalMs);
+      return () => {
+        clearTimeout(delayed);
+        clearInterval(timer);
+        abortRef.current?.abort();
+      };
+    }
+
+    const cached = readQuotesCache<DashboardQuotes>();
+    if (cached) {
+      setData(cached);
+      setLoading(false);
       void loadQuotes(true);
     } else {
-      const cached = readQuotesCache<DashboardQuotes>();
-      if (cached) {
-        setData(cached);
-        setLoading(false);
-        void loadQuotes(true);
-      } else {
-        void loadQuotes(false);
-      }
+      void loadQuotes(false);
     }
 
     const intervalMs = isServerDataMode() ? 2 * 60 * 1000 : 5 * 60 * 1000;
@@ -69,7 +77,7 @@ export function Dashboard({ initialData = null }: DashboardProps) {
       clearInterval(timer);
       abortRef.current?.abort();
     };
-  }, [loadQuotes]);
+  }, [loadQuotes, initialData]);
 
   const filtered =
     data?.quotes.filter((q) => filter === "all" || q.commodity.market === filter) ?? [];

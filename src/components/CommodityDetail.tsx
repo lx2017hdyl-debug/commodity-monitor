@@ -41,48 +41,52 @@ const RANGE_OPTIONS = [
 
 interface CommodityDetailProps {
   commodityId: string;
+  initialData?: DetailResponse | null;
 }
 
 /** 品种详情页 */
-export function CommodityDetail({ commodityId }: CommodityDetailProps) {
+export function CommodityDetail({ commodityId, initialData = null }: CommodityDetailProps) {
   const [range, setRange] = useState("3mo");
-  const [data, setData] = useState<DetailResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<DetailResponse | null>(initialData);
+  const [loading, setLoading] = useState(!initialData);
   const [chartLoading, setChartLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const skipRangeEffect = useRef(true);
   const rangeRef = useRef(range);
   rangeRef.current = range;
 
-  const loadDetail = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-
-    const commodity = getCommodityById(commodityId);
-    const cached = readQuoteFromCache(commodityId) as QuoteSnapshot | null;
-    if (cached?.price && commodity) {
-      setData({
-        dataDisclaimer:
-          "数据来源为新浪财经公开接口，通常为延迟行情（约 15 分钟或更久），仅供采购参考。",
-        serverTime: new Date().toISOString(),
-        commodity,
-        snapshot: { ...cached, history: [] },
-        forecast: [],
-      });
-      setLoading(false);
-    }
-
-    try {
-      const json = await loadCommodityDetailFast(commodityId, rangeRef.current);
-      setData(json);
-    } catch (e) {
-      if (!cached?.price) {
-        setError(e instanceof Error ? e.message : "未知错误");
+  const loadDetail = useCallback(
+    async (soft = false) => {
+      if (!soft) {
+        setLoading(true);
+        setError(null);
       }
-    } finally {
-      setLoading(false);
-    }
-  }, [commodityId]);
+
+      const commodity = getCommodityById(commodityId);
+      const cached = readQuoteFromCache(commodityId) as QuoteSnapshot | null;
+      if (!soft && cached?.price && commodity && !initialData) {
+        setData({
+          dataDisclaimer:
+            "数据来源为东方财富/新浪财经公开接口，延迟行情仅供采购参考。",
+          serverTime: new Date().toISOString(),
+          commodity,
+          snapshot: { ...cached, history: [] },
+          forecast: [],
+        });
+        setLoading(false);
+      }
+
+      try {
+        const json = await loadCommodityDetailFast(commodityId, rangeRef.current);
+        setData(json);
+      } catch (e) {
+        if (!soft) setError(e instanceof Error ? e.message : "未知错误");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [commodityId, initialData],
+  );
 
   const loadHistoryOnly = useCallback(
     async (nextRange: string) => {
@@ -109,8 +113,9 @@ export function CommodityDetail({ commodityId }: CommodityDetailProps) {
 
   useEffect(() => {
     skipRangeEffect.current = true;
-    void loadDetail();
-  }, [commodityId, loadDetail]);
+    if (initialData) return;
+    void loadDetail(false);
+  }, [commodityId, initialData, loadDetail]);
 
   useEffect(() => {
     if (skipRangeEffect.current) {

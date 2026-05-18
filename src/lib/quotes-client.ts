@@ -1,5 +1,5 @@
 /**
- * 统一行情加载：阿里云用服务端 API，Vercel 等用浏览器直连
+ * 统一行情加载：优先本站 API（Vercel 香港节点走东财），失败再浏览器直连
  */
 
 import { COMMODITIES, getCommodityById } from "@/lib/commodities";
@@ -17,15 +17,23 @@ import { readQuoteFromCache, readQuotesCache, writeQuotesCache } from "@/lib/quo
 
 export type DashboardQuotes = QuotesPayload;
 
+const API_TIMEOUT_MS = 12_000;
+
 async function parseJsonResponse<T>(res: Response): Promise<T> {
   const text = await res.text();
   if (!text) throw new Error("接口返回为空");
   return JSON.parse(text) as T;
 }
 
-/** 从本站 API 拉看板（国内服务器上走东财/新浪，速度快） */
+function fetchWithTimeout(url: string, init?: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+  return fetch(url, { ...init, signal: controller.signal }).finally(() => clearTimeout(timer));
+}
+
+/** 从本站 API 拉看板 */
 async function fetchDashboardFromApi(): Promise<DashboardQuotes> {
-  const res = await fetch("/api/quotes", { cache: "no-store" });
+  const res = await fetchWithTimeout("/api/quotes", { cache: "no-store" });
   const json = await parseJsonResponse<DashboardQuotes & { error?: string }>(res);
   if (!res.ok || json.quotes.length === 0) {
     throw new Error(json.errors?.[0]?.error ?? "看板数据加载失败");
@@ -35,9 +43,10 @@ async function fetchDashboardFromApi(): Promise<DashboardQuotes> {
 
 /** 从本站 API 拉详情 */
 async function fetchDetailFromApi(commodityId: string, range: string) {
-  const res = await fetch(`/api/quotes/${commodityId}?range=${encodeURIComponent(range)}`, {
-    cache: "no-store",
-  });
+  const res = await fetchWithTimeout(
+    `/api/quotes/${commodityId}?range=${encodeURIComponent(range)}`,
+    { cache: "no-store" },
+  );
   const json = await parseJsonResponse<
     Awaited<ReturnType<typeof loadCommodityDetailBrowser>> & { error?: string }
   >(res);
@@ -45,12 +54,33 @@ async function fetchDetailFromApi(commodityId: string, range: string) {
   return json;
 }
 
-/** 浏览器直连看板 */
-export async function loadDashboardQuotesFast(): Promise<DashboardQuotes> {
+/** 浏览器直连看板（备用） */
+async function loadDashboardQuotesBrowserFallback(): Promise<DashboardQuotes> {
   try {
     return await loadDashboardQuotesBrowser(COMMODITIES);
   } catch {
     return loadDashboardQuotesEastMoneyBrowser();
+  }
+}
+
+/** 看板：API 优先 */
+async function loadDashboardQuotesSmart(): Promise<DashboardQuotes> {
+  try {
+    return await fetchDashboardFromApi();
+  } catch {
+    if (isServerDataMode()) throw new Error("行情接口暂时不可用，请稍后刷新");
+    return loadDashboardQuotesBrowserFallback();
+  }
+}
+
+/** 详情：API 优先 */
+async function loadCommodityDetailSmart(commodityId: string, range: string) {
+  try {
+    return await fetchDetailFromApi(commodityId, range);
+  } catch {
+    const commodity = getCommodityById(commodityId);
+    if (!commodity) throw new Error("品种不存在");
+    return loadCommodityDetailBrowser(commodity, range);
   }
 }
 
@@ -61,7 +91,7 @@ export async function loadDashboardWithCache(
   const cached = readQuotesCache<DashboardQuotes>();
   if (cached) onCached?.(cached);
 
-  const fresh = isServerDataMode() ? await fetchDashboardFromApi() : await loadDashboardQuotesFast();
+  const fresh = await loadDashboardQuotesSmart();
   writeQuotesCache(fresh);
   return fresh;
 }
@@ -73,14 +103,9 @@ export async function loadCommodityDetailFast(commodityId: string, range: string
     throw new Error(commodity?.unavailableReason ?? "品种不可用");
   }
 
-  if (isServerDataMode()) {
-    return fetchDetailFromApi(commodityId, range);
-  }
-
   const cached = readQuoteFromCache(commodityId) as QuoteSnapshot | null;
-  const history = await loadCommodityHistoryBrowser(commodity, range);
-
-  if (cached?.price) {
+  if (!isServerDataMode() && cached?.price) {
+    const history = await loadCommodityHistoryBrowser(commodity, range);
     const snapshot: QuoteSnapshot = { ...cached, history };
     return {
       dataDisclaimer:
@@ -92,7 +117,7 @@ export async function loadCommodityDetailFast(commodityId: string, range: string
     };
   }
 
-  return loadCommodityDetailBrowser(commodity, range);
+  return loadCommodityDetailSmart(commodityId, range);
 }
 
 /** 仅刷新 K 线 */

@@ -1,7 +1,7 @@
 /** 浏览器端行情缓存（sessionStorage），加快二次打开与刷新 */
 
 const CACHE_KEY = "commodity-monitor-quotes-v1";
-const CACHE_TTL_MS = 90_000; // 90 秒
+const CACHE_TTL_MS = 120_000; // 120 秒
 
 export interface CachedQuotesPayload {
   savedAt: number;
