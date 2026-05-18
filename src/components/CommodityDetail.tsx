@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import type { CommodityConfig } from "@/lib/commodities";
+import { getCommodityById, type CommodityConfig } from "@/lib/commodities";
 import { formatChangePercent, formatPrice } from "@/lib/commodities";
+import { loadCommodityDetailBrowser } from "@/lib/market-data-browser";
 import type { QuoteSnapshot } from "@/lib/sina-finance";
 import { formatFetchedAt } from "@/lib/format-time";
 import { DataTimestamp } from "./DataTimestamp";
@@ -44,18 +45,20 @@ export function CommodityDetail({ commodityId }: CommodityDetailProps) {
   const [error, setError] = useState<string | null>(null);
 
   const loadDetail = useCallback(async () => {
+    const commodity = getCommodityById(commodityId);
+    if (!commodity?.available) {
+      setError(commodity?.unavailableReason ?? "该品种暂不可用");
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/quotes/${commodityId}?range=${range}`);
-      const json = (await res.json()) as DetailResponse;
-      if (!res.ok) {
-        throw new Error(json.error ?? "加载失败");
-      }
-      setData(json);
+      const json = await loadCommodityDetailBrowser(commodity, range);
+      setData(json as DetailResponse);
     } catch (e) {
       setError(e instanceof Error ? e.message : "未知错误");
-      setData(null);
     } finally {
       setLoading(false);
     }

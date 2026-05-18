@@ -81,7 +81,7 @@ async function fetchSinaQuotes(quoteSymbols: string[]): Promise<Map<string, stri
 }
 
 /** 解析国内期货 nf_ 报价 */
-function parseDomesticQuote(fields: string[], symbol: string): Omit<QuoteSnapshot, "history"> {
+export function parseDomesticQuote(fields: string[], symbol: string): Omit<QuoteSnapshot, "history"> {
   const open = Number(fields[2]) || 0;
   const high = Number(fields[3]) || 0;
   const low = Number(fields[4]) || 0;
@@ -107,7 +107,7 @@ function parseDomesticQuote(fields: string[], symbol: string): Omit<QuoteSnapsho
 }
 
 /** 解析国际期货 hf_ 报价 */
-function parseInternationalQuote(fields: string[], symbol: string): Omit<QuoteSnapshot, "history"> {
+export function parseInternationalQuote(fields: string[], symbol: string): Omit<QuoteSnapshot, "history"> {
   const price = Number(fields[0]) || 0;
   const open = Number(fields[2]) || price;
   const high = Number(fields[4]) || Number(fields[3]) || 0;
