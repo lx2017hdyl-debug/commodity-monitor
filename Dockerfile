@@ -1,4 +1,4 @@
-# 阿里云 ECS / 容器服务部署
+# 阿里云 ECS / Oracle 云 Always Free / 其他 Linux 服务器
 FROM node:20-alpine AS base
 WORKDIR /app
 RUN apk add --no-cache libc6-compat
