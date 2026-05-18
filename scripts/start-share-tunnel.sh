@@ -34,11 +34,17 @@ if [ ! -d node_modules ]; then
   npm ci 2>/dev/null || npm install
 fi
 
-if [ ! -d .next ]; then
+if [ ! -d .next ] || [ ! -f .next/BUILD_ID ]; then
   echo "==> 生产构建（首次约 2 分钟）..."
   export NEXT_PUBLIC_DATA_MODE=server
   npm run build
 fi
+
+# 若代码有更新，建议先 npm run build 再运行本脚本
+
+echo "==> 停止占用 ${PORT} 端口的旧进程（避免 CSS/JS 版本不一致）..."
+lsof -ti ":${PORT}" | xargs kill -9 2>/dev/null || true
+sleep 1
 
 echo "==> 启动本地服务 http://127.0.0.1:${PORT} ..."
 export NEXT_PUBLIC_DATA_MODE=server
