@@ -3,17 +3,30 @@
 # 用法：bash scripts/start-share-tunnel.sh
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "${ROOT}"
 PORT="${PORT:-3000}"
+LOCAL_CF="${ROOT}/.bin/cloudflared"
 
-if ! command -v cloudflared >/dev/null 2>&1; then
-  echo "==> 未安装 cloudflared，正在用 Homebrew 安装..."
-  if ! command -v brew >/dev/null 2>&1; then
-    echo "请先安装 Homebrew: https://brew.sh"
-    echo "或手动安装: brew install cloudflared"
-    exit 1
-  fi
-  brew install cloudflared
+if [ -x "${LOCAL_CF}" ]; then
+  CLOUDFLARED="${LOCAL_CF}"
+elif command -v cloudflared >/dev/null 2>&1; then
+  CLOUDFLARED="cloudflared"
+else
+  echo "==> 下载 cloudflared 到项目 .bin 目录..."
+  mkdir -p "${ROOT}/.bin"
+  ARCH="$(uname -m)"
+  case "${ARCH}" in
+    arm64) CF_ARCH="arm64" ;;
+    x86_64) CF_ARCH="amd64" ;;
+    *) echo "不支持的架构: ${ARCH}"; exit 1 ;;
+  esac
+  curl -fsSL -o "${ROOT}/.bin/cloudflared.tgz" \
+    "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-darwin-${CF_ARCH}.tgz"
+  tar -xzf "${ROOT}/.bin/cloudflared.tgz" -C "${ROOT}/.bin"
+  chmod +x "${LOCAL_CF}"
+  rm -f "${ROOT}/.bin/cloudflared.tgz"
+  CLOUDFLARED="${LOCAL_CF}"
 fi
 
 if [ ! -d node_modules ]; then
@@ -46,6 +59,6 @@ echo "    下方会出现 trycloudflare.com 地址，复制发给同事即可。
 echo "    按 Ctrl+C 停止（本机关机后链接失效）。"
 echo ""
 
-cloudflared tunnel --url "http://127.0.0.1:${PORT}" &
+"${CLOUDFLARED}" tunnel --url "http://127.0.0.1:${PORT}" &
 TUNNEL_PID=$!
 wait "$TUNNEL_PID"
